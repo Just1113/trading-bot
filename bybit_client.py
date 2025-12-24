@@ -10,11 +10,7 @@ def sign(params):
 
 def get_balance():
     ts = int(time.time() * 1000)
-    params = {
-        "api_key": API_KEY,
-        "timestamp": ts,
-        "accountType": "UNIFIED"
-    }
+    params = {"api_key": API_KEY, "timestamp": ts, "accountType": "UNIFIED"}
     params["sign"] = sign(params)
     r = requests.get(f"{BASE_URL}/v5/account/wallet-balance", params=params, timeout=10)
     r.raise_for_status()
@@ -28,6 +24,6 @@ def get_candles(symbol, interval="1m", limit=50):
     return r.json().get("result", [])
 
 def place_order(symbol, side, qty, sl, tp):
-    # This function executes order via Bybit API
+    # Example: replace with actual Bybit order endpoint
     print(f"EXECUTE ORDER → {symbol} | {side} | qty={qty} | SL={sl} | TP={tp}")
-    # Implement actual POST request to Bybit orders endpoint here
+    
