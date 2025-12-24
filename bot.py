@@ -3,7 +3,7 @@ import logging
 import sys
 import os
 from telegram_bot import TelegramBot
-from keepalive import KeepAliveServer
+# 🔥 REMOVE this import: from keepalive import KeepAliveServer
 import signal
 
 # Configure logging
@@ -38,10 +38,12 @@ async def run_bot():
         
         logger.info("✅ All environment variables verified")
         
-        # Start keepalive server for Render
-        keepalive = KeepAliveServer()
-        keepalive.start()
-        logger.info("✅ Keepalive server started on port 8080")
+        # 🔥 COMMENT OUT OR REMOVE the keepalive server - NOT NEEDED ON RENDER
+        # keepalive = KeepAliveServer()
+        # keepalive.start()
+        # logger.info("✅ Keepalive server started on port 8080")
+        
+        logger.info("⚠️ Keepalive server disabled - using Render's built-in health checks")
         
         # Start Telegram bot
         telegram_bot = TelegramBot()
