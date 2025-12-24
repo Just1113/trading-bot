@@ -124,4 +124,3 @@ def start_bot():
 
     # Run the bot
     app.run_polling()
-polling()
