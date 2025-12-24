@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: bybit-trading-bot
+    env: python
+    # 🔧 FORCE Python 3.10.12 here
+    pythonVersion: "3.10.12"
+    # 📍 Choose a region (optional)
+    region: oregon # or singapore, frankfurt
+    # 🏗️ Your build command (already fixed)
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    # ▶️ Your start command
+    startCommand: "python bot.py"
+    # 🔑 Set your environment variables here or in the dashboard
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: BYBIT_API_KEY
+        sync: false
+      - key: BYBIT_API_SECRET
+        sync: false
+      - key: BYBIT_TESTNET
+        value: "true"
+      # ... add all other required variables
