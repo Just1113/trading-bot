@@ -2,18 +2,19 @@ services:
   - type: web
     name: bybit-trading-bot
     env: python
-    region: oregon  # or singapore, frankfurt, etc.
+    region: oregon  # Optional: choose your region
     
-    # ✅ CORRECT: Build and start commands go here
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: python bot.py
+    # REQUIRED: Must specify a plan when setting python version
+    plan: free
     
-    # ✅ CORRECT: Plan configuration with pythonVersion
-    plan: free  # or "starter", "professional"
-    pythonVersion: "3.10.12"
-    
-    # ✅ Environment variables (sync: false means you'll set values in dashboard)
+    # CORRECT: Python version is specified here, not as a separate field
+    # This is the only way that works in current Render Blueprints
     envVars:
+      # 🔴 CRITICAL: Force Python 3.10.12 with this variable
+      - key: PYTHON_VERSION
+        value: "3.10.12"
+      
+      # Your bot's environment variables
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: ADMIN_CHAT_ID
@@ -30,13 +31,7 @@ services:
         value: "10"
       - key: RISK_PERCENTAGE
         value: "2"
-      - key: STOP_LOSS_PERCENT
-        value: "1.5"
-      - key: TAKE_PROFIT_PERCENT
-        value: "3.0"
-      - key: SCAN_INTERVAL
-        value: "60"
-      - key: MIN_CONFIDENCE
-        value: "0.7"
-      - key: LOG_LEVEL
-        value: "INFO"
+    
+    # Build and start commands
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python bot.py
