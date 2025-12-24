@@ -1,18 +1,47 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    JobQueue
+)
 from strategies import STRATEGIES
 from ml_model import predict_confidence
 from bybit_client import get_candles, get_balance, place_order
 import config
+import asyncio
 
 LAST_SIGNAL = {}
 
+# --- Admin Commands ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Trading bot online.")
+    await update.message.reply_text("Trading bot is online and scanning pairs.")
 
-async def generate_signals(context):
+async def set_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        try:
+            config.LEVERAGE = int(context.args[0])
+            await update.message.reply_text(f"Leverage set to {config.LEVERAGE}x")
+        except ValueError:
+            await update.message.reply_text("Please provide a valid number.")
+    else:
+        await update.message.reply_text("Usage: /setleverage <number>")
+
+async def set_risk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        try:
+            config.RISK_PERCENT = float(context.args[0])
+            await update.message.reply_text(f"Risk set to {config.RISK_PERCENT}%")
+        except ValueError:
+            await update.message.reply_text("Please provide a valid number.")
+    else:
+        await update.message.reply_text("Usage: /setrisk <number>")
+
+# --- Signal Generation ---
+async def generate_signals(context: ContextTypes.DEFAULT_TYPE):
     balance_info = get_balance()
-    # Extract USDT balance (example)
+    # Extract USDT balance example
     balance = float(balance_info.get("result", {}).get("USDT", {}).get("totalBalance", 100))
 
     for pair in config.PAIRS:
@@ -20,10 +49,17 @@ async def generate_signals(context):
         for name, func in STRATEGIES.items():
             signal = func(candles)
             if signal == "HOLD":
-                continue
+                continue  # Skip signals that don't suggest action
             confidence = predict_confidence(name, signal)
-            sl = round(float(candles[-1]['close']) * 0.985, 2)  # 1.5% below for BUY
-            tp = round(float(candles[-1]['close']) * 1.03, 2)   # 3% above for BUY
+
+            last_price = float(candles[-1]['close'])
+            if signal == "BUY":
+                sl = round(last_price * 0.985, 2)  # 1.5% below
+                tp = round(last_price * 1.03, 2)   # 3% above
+            else:
+                sl = round(last_price * 1.015, 2)  # 1.5% above
+                tp = round(last_price * 0.97, 2)   # 3% below
+
             qty = round(balance * config.RISK_PERCENT / 100 * config.LEVERAGE, 3)
 
             LAST_SIGNAL[pair] = {"side": signal, "sl": sl, "tp": tp, "qty": qty}
@@ -46,37 +82,46 @@ async def generate_signals(context):
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
 
+# --- YES / NO Callback ---
 async def confirm_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action, pair = query.data.split("|")
     signal = LAST_SIGNAL.get(pair)
+    if not signal:
+        await query.edit_message_text("Signal not found or expired.")
+        return
+
     if action == "confirm_yes":
         place_order(pair, signal["side"], signal["qty"], signal["sl"], signal["tp"])
-        await query.edit_message_text(f"Trade executed for {pair}.")
+        await query.edit_message_text(f"✅ Trade executed for {pair}.")
     else:
-        await query.edit_message_text(f"Trade cancelled for {pair}.")
+        await query.edit_message_text(f"❌ Trade cancelled for {pair}.")
 
-async def set_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        config.LEVERAGE = int(context.args[0])
-        await update.message.reply_text(f"Leverage set to {config.LEVERAGE}x")
+# --- Startup Message ---
+async def startup_message(application):
+    await application.bot.send_message(
+        chat_id=config.ADMIN_ID,
+        text="🚀 Bot started successfully on Render and scanning multiple pairs!"
+    )
 
-async def set_risk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        config.RISK_PERCENT = int(context.args[0])
-        await update.message.reply_text(f"Risk set to {config.RISK_PERCENT}%")
-
-async def startup_message(app):
-    await app.bot.send_message(chat_id=config.ADMIN_ID, text="Bot started on Render scanning multiple pairs!")
-
+# --- Bot Runner ---
 def start_bot():
     app = ApplicationBuilder().token(config.BOT_TOKEN).build()
+
+    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setleverage", set_leverage))
     app.add_handler(CommandHandler("setrisk", set_risk))
     app.add_handler(CallbackQueryHandler(confirm_trade))
+
+    # Startup message
     app.post_init = startup_message
 
-    app.job_queue.run_once(generate_signals, when=10)
+    # Job queue to generate signals every minute
+    job_queue: JobQueue = app.job_queue
+    job_queue.run_repeating(generate_signals, interval=60, first=10)
+
+    # Run the bot
     app.run_polling()
+polling()
