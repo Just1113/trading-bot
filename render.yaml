@@ -2,18 +2,18 @@ services:
   - type: web
     name: bybit-trading-bot
     env: python
-    # 🔧 FORCE Python 3.10.12 here
+    region: oregon  # or singapore, frankfurt, etc.
+    
+    # ✅ CORRECT: Build and start commands go here
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python bot.py
+    
+    # ✅ CORRECT: Plan configuration with pythonVersion
+    plan: free  # or "starter", "professional"
     pythonVersion: "3.10.12"
-    # 📍 Choose a region (optional)
-    region: oregon # or singapore, frankfurt
-    # 🏗️ Your build command (already fixed)
-    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
-    # ▶️ Your start command
-    startCommand: "python bot.py"
-    # 🔑 Set your environment variables here or in the dashboard
+    
+    # ✅ Environment variables (sync: false means you'll set values in dashboard)
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.12
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: ADMIN_CHAT_ID
@@ -24,4 +24,19 @@ services:
         sync: false
       - key: BYBIT_TESTNET
         value: "true"
-      # ... add all other required variables
+      - key: TRADE_PAIRS
+        value: "BTCUSDT,ETHUSDT"
+      - key: DEFAULT_LEVERAGE
+        value: "10"
+      - key: RISK_PERCENTAGE
+        value: "2"
+      - key: STOP_LOSS_PERCENT
+        value: "1.5"
+      - key: TAKE_PROFIT_PERCENT
+        value: "3.0"
+      - key: SCAN_INTERVAL
+        value: "60"
+      - key: MIN_CONFIDENCE
+        value: "0.7"
+      - key: LOG_LEVEL
+        value: "INFO"
