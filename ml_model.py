@@ -4,7 +4,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
 import os
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List  # ✅ CORRECT IMPORT
 import logging
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,8 @@ class SignalConfidenceModel:
                     indicators['rsi'] = rsi
             
             # Calculate EMA difference
+            # You need to import TradingStrategies if used here
+            from strategies import TradingStrategies
             if len(prices) >= 22:
                 ema_9 = TradingStrategies.calculate_ema(prices, 9)[-1]
                 ema_21 = TradingStrategies.calculate_ema(prices, 21)[-1]
@@ -129,7 +131,6 @@ class SignalConfidenceModel:
             label = 1 if actual_success else 0
             
             # Partial fit (if supported) or retrain periodically
-            # For simplicity, we'll retrain periodically
             logger.info(f"Model update queued - Success: {actual_success}")
             
         except Exception as e:
