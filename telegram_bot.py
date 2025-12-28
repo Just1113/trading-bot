@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    ContextTypes, MessageHandler, filters
+    ContextTypes
 )
 import asyncio
 import logging
@@ -20,9 +20,10 @@ class TelegramBot:
         self.application = None
         self.bybit_client = BybitClient()
         self.ml_model = SignalConfidenceModel()
-        self.pending_signals = {}  # Store pending signals for confirmation
-        self.last_signals = {}  # Track last signals to avoid duplicates
-        
+        self.pending_signals = {}
+        self.last_signals = {}
+        self.is_scanning = False
+    
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         if str(update.effective_chat.id) != config.ADMIN_CHAT_ID:
@@ -37,13 +38,30 @@ class TelegramBot:
             "/setrisk <percentage> - Set risk percentage\n"
             "/status - Check bot status\n"
             "/balance - Check account balance\n"
-            "/positions - View open positions"
+            "/positions - View open positions\n"
+            "/startsignal - Start signal scanning"
         )
         
-        # Start scanning in background
-        asyncio.create_task(self.start_scanning())
+        # Start scanning if not already running
+        if not self.is_scanning:
+            asyncio.create_task(self.start_scanning())
+            self.is_scanning = True
+            logger.info("Signal scanning started via /start command")
         
         logger.info("Bot started successfully")
+    
+    async def start_signal_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /startsignal command"""
+        if str(update.effective_chat.id) != config.ADMIN_CHAT_ID:
+            await update.message.reply_text("⛔ Unauthorized access.")
+            return
+        
+        if not self.is_scanning:
+            asyncio.create_task(self.start_scanning())
+            self.is_scanning = True
+            await update.message.reply_text("✅ Signal scanning started!")
+        else:
+            await update.message.reply_text("⚠️ Signal scanning is already running.")
     
     async def set_leverage_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /setleverage command"""
@@ -109,6 +127,7 @@ class TelegramBot:
             f"Risk per Trade: {config.RISK_PERCENTAGE}%\n"
             f"Scan Interval: {config.SCAN_INTERVAL}s\n"
             f"Min Confidence: {config.MIN_CONFIDENCE*100}%\n"
+            f"Signal Scanning: {'✅ Active' if self.is_scanning else '❌ Inactive'}\n"
             f"Last Signals: {len(self.last_signals)}\n"
             f"Pending Signals: {len(self.pending_signals)}"
         )
@@ -274,80 +293,90 @@ class TelegramBot:
     async def start_scanning(self):
         """Start continuous scanning of all pairs"""
         logger.info("Starting multi-pair scanning...")
+        self.is_scanning = True
         
-        while True:
+        while self.is_scanning:
             try:
                 for symbol in config.TRADE_PAIRS:
-                    signal = await self.scan_pair(symbol)
-                    
-                    if signal:
-                        # Store in last signals
-                        signal_key = f"{signal['symbol']}_{signal['signal']}"
-                        self.last_signals[signal_key] = time.time()
+                    try:
+                        signal = await self.scan_pair(symbol)
                         
-                        # Send signal to Telegram
-                        await self.send_signal_alert(signal)
+                        if signal:
+                            # Store in last signals
+                            signal_key = f"{signal['symbol']}_{signal['signal']}"
+                            self.last_signals[signal_key] = time.time()
+                            
+                            # Send signal to Telegram
+                            await self.send_signal_alert(signal)
+                    except Exception as e:
+                        logger.error(f"Error scanning {symbol}: {e}")
+                        continue
                 
                 # Wait for next scan
                 await asyncio.sleep(config.SCAN_INTERVAL)
                 
+            except asyncio.CancelledError:
+                logger.info("Signal scanning cancelled")
+                break
             except Exception as e:
                 logger.error(f"Scanning error: {e}")
                 await asyncio.sleep(config.SCAN_INTERVAL)
+        
+        self.is_scanning = False
     
     async def send_signal_alert(self, signal: Dict):
         """Send signal alert to Telegram with confirmation buttons"""
-        symbol = signal['symbol']
-        current_price = signal['current_price']
-        confidence = signal['confidence']
-        
-        # Create unique callback data
-        timestamp = int(time.time())
-        callback_id = f"confirm_{symbol}_{timestamp}"
-        cancel_id = f"cancel_{symbol}_{timestamp}"
-        
-        # Store signal data
-        self.pending_signals[callback_id] = signal
-        self.pending_signals[cancel_id] = signal
-        
-        # Create keyboard
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ YES - Execute", callback_data=callback_id),
-                InlineKeyboardButton("❌ NO - Cancel", callback_data=cancel_id)
+        try:
+            symbol = signal['symbol']
+            current_price = signal['current_price']
+            confidence = signal['confidence']
+            
+            # Create unique callback data
+            timestamp = int(time.time())
+            callback_id = f"confirm_{symbol}_{timestamp}"
+            cancel_id = f"cancel_{symbol}_{timestamp}"
+            
+            # Store signal data
+            self.pending_signals[callback_id] = signal
+            self.pending_signals[cancel_id] = signal
+            
+            # Create keyboard
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ YES - Execute", callback_data=callback_id),
+                    InlineKeyboardButton("❌ NO - Cancel", callback_data=cancel_id)
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Send message
-        message_text = (
-            f"🚨 Trading Signal Detected!\n\n"
-            f"Symbol: {symbol}\n"
-            f"Signal: {signal['signal']}\n"
-            f"Current Price: ${current_price:.2f}\n"
-            f"Confidence: {confidence:.1%}\n\n"
-            f"Execute trade?"
-        )
-        
-        # Get bot instance from application
-        if self.application:
-            try:
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Send message
+            message_text = (
+                f"🚨 Trading Signal Detected!\n\n"
+                f"Symbol: {symbol}\n"
+                f"Signal: {signal['signal']}\n"
+                f"Current Price: ${current_price:.2f}\n"
+                f"Confidence: {confidence:.1%}\n\n"
+                f"Execute trade?"
+            )
+            
+            if self.application:
                 await self.application.bot.send_message(
                     chat_id=config.ADMIN_CHAT_ID,
                     text=message_text,
                     reply_markup=reply_markup
                 )
-            except Exception as e:
-                logger.error(f"Failed to send Telegram message: {e}")
+        except Exception as e:
+            logger.error(f"Failed to send signal alert: {e}")
     
     async def run(self):
-        """Start the Telegram bot - MAIN ENTRY POINT"""
+        """Start the Telegram bot - SIMPLIFIED VERSION"""
         try:
             # Create application
             self.application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
             
             # Add command handlers
             self.application.add_handler(CommandHandler("start", self.start_command))
+            self.application.add_handler(CommandHandler("startsignal", self.start_signal_command))
             self.application.add_handler(CommandHandler("setleverage", self.set_leverage_command))
             self.application.add_handler(CommandHandler("setrisk", self.set_risk_command))
             self.application.add_handler(CommandHandler("balance", self.check_balance_command))
@@ -360,10 +389,8 @@ class TelegramBot:
             # Start bot
             logger.info("Telegram bot starting...")
             
-            # Start scanning in background
-            asyncio.create_task(self.start_scanning())
-            
-            # Start polling - this will keep the bot running
+            # 🔥 CRITICAL FIX: Start polling WITHOUT background tasks
+            # The event loop issue happens when we create tasks before polling starts
             await self.application.run_polling()
             
         except Exception as e:
