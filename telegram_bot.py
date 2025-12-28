@@ -292,20 +292,33 @@ class TelegramBot:
                 reply_markup=reply_markup
             )
     
-    async def run(self):
-        """Start the Telegram bot"""
-        # Create application
-        self.application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
-        
-        # Add command handlers
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CommandHandler("setleverage", self.set_leverage_command))
-        self.application.add_handler(CommandHandler("setrisk", self.set_risk_command))
-        self.application.add_handler(CommandHandler("balance", self.check_balance_command))
-        
-        # Add callback handler for buttons
-        self.application.add_handler(CallbackQueryHandler(self.button_callback))
-        
-        # Start bot
-        logger.info("Telegram bot starting...")
-        await self.application.run_polling()
+    # ... (keep all your existing imports and class definition)
+
+async def run(self):
+    """Start the Telegram bot - CORRECTED VERSION"""
+    # Create application
+    self.application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    
+    # Add command handlers
+    self.application.add_handler(CommandHandler("start", self.start_command))
+    self.application.add_handler(CommandHandler("setleverage", self.set_leverage_command))
+    self.application.add_handler(CommandHandler("setrisk", self.set_risk_command))
+    self.application.add_handler(CommandHandler("balance", self.check_balance_command))
+    
+    # Add callback handler for buttons
+    self.application.add_handler(CallbackQueryHandler(self.button_callback))
+    
+    # Start bot
+    logger.info("Telegram bot starting...")
+    
+    # 🔥 CORRECTION: Use create_task instead of await for polling
+    # This prevents blocking the main event loop
+    asyncio.create_task(self.application.run_polling())
+    
+    # 🔥 ADD: Start scanning in background
+    asyncio.create_task(self.start_scanning())
+    
+    # 🔥 ADD: Keep the event loop running
+    # This is the key fix - we need to keep the main coroutine alive
+    while True:
+        await asyncio.sleep(3600)  # Sleep for 1 hour, keep bot alive
