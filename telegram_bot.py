@@ -6,6 +6,7 @@ from telegram.ext import (
 import asyncio
 import logging
 from typing import Dict, Any
+import time
 
 from config import config
 from strategies import TradingStrategies
@@ -94,6 +95,49 @@ class TelegramBot:
         
         balance = self.bybit_client.get_account_balance()
         await update.message.reply_text(f"💰 Account Balance: ${balance:,.2f}")
+    
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /status command"""
+        if str(update.effective_chat.id) != config.ADMIN_CHAT_ID:
+            await update.message.reply_text("⛔ Unauthorized access.")
+            return
+        
+        status_msg = (
+            "🤖 Bot Status\n\n"
+            f"Active Pairs: {', '.join(config.TRADE_PAIRS)}\n"
+            f"Leverage: {config.DEFAULT_LEVERAGE}x\n"
+            f"Risk per Trade: {config.RISK_PERCENTAGE}%\n"
+            f"Scan Interval: {config.SCAN_INTERVAL}s\n"
+            f"Min Confidence: {config.MIN_CONFIDENCE*100}%\n"
+            f"Last Signals: {len(self.last_signals)}\n"
+            f"Pending Signals: {len(self.pending_signals)}"
+        )
+        await update.message.reply_text(status_msg)
+    
+    async def positions_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /positions command"""
+        if str(update.effective_chat.id) != config.ADMIN_CHAT_ID:
+            await update.message.reply_text("⛔ Unauthorized access.")
+            return
+        
+        positions = self.bybit_client.get_open_positions()
+        if not positions:
+            await update.message.reply_text("📭 No open positions.")
+            return
+        
+        position_text = "📊 Open Positions:\n\n"
+        for pos in positions:
+            if float(pos.get('size', 0)) > 0:
+                position_text += (
+                    f"Symbol: {pos.get('symbol', 'N/A')}\n"
+                    f"Side: {pos.get('side', 'N/A')}\n"
+                    f"Size: {pos.get('size', '0')}\n"
+                    f"Entry: ${pos.get('entryPrice', '0')}\n"
+                    f"P&L: ${pos.get('unrealisedPnl', '0')}\n"
+                    "─" * 20 + "\n"
+                )
+        
+        await update.message.reply_text(position_text)
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button callbacks for trade confirmation"""
@@ -212,7 +256,7 @@ class TelegramBot:
             # Check for duplicate signal
             signal_key = f"{symbol}_{final_signal}"
             if (signal_key in self.last_signals and 
-                (asyncio.get_event_loop().time() - self.last_signals[signal_key]) < 300):  # 5 minutes
+                (time.time() - self.last_signals[signal_key]) < 300):  # 5 minutes
                 return None
             
             return {
@@ -239,7 +283,7 @@ class TelegramBot:
                     if signal:
                         # Store in last signals
                         signal_key = f"{signal['symbol']}_{signal['signal']}"
-                        self.last_signals[signal_key] = asyncio.get_event_loop().time()
+                        self.last_signals[signal_key] = time.time()
                         
                         # Send signal to Telegram
                         await self.send_signal_alert(signal)
@@ -258,8 +302,9 @@ class TelegramBot:
         confidence = signal['confidence']
         
         # Create unique callback data
-        callback_id = f"confirm_{symbol}_{int(asyncio.get_event_loop().time())}"
-        cancel_id = f"cancel_{symbol}_{int(asyncio.get_event_loop().time())}"
+        timestamp = int(time.time())
+        callback_id = f"confirm_{symbol}_{timestamp}"
+        cancel_id = f"cancel_{symbol}_{timestamp}"
         
         # Store signal data
         self.pending_signals[callback_id] = signal
@@ -286,39 +331,59 @@ class TelegramBot:
         
         # Get bot instance from application
         if self.application:
-            await self.application.bot.send_message(
-                chat_id=config.ADMIN_CHAT_ID,
-                text=message_text,
-                reply_markup=reply_markup
-            )
+            try:
+                await self.application.bot.send_message(
+                    chat_id=config.ADMIN_CHAT_ID,
+                    text=message_text,
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.error(f"Failed to send Telegram message: {e}")
     
-    # ... (keep all your existing imports and class definition)
+    async def run(self):
+        """Start the Telegram bot - MAIN ENTRY POINT"""
+        try:
+            # Create application
+            self.application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+            
+            # Add command handlers
+            self.application.add_handler(CommandHandler("start", self.start_command))
+            self.application.add_handler(CommandHandler("setleverage", self.set_leverage_command))
+            self.application.add_handler(CommandHandler("setrisk", self.set_risk_command))
+            self.application.add_handler(CommandHandler("balance", self.check_balance_command))
+            self.application.add_handler(CommandHandler("status", self.status_command))
+            self.application.add_handler(CommandHandler("positions", self.positions_command))
+            
+            # Add callback handler for buttons
+            self.application.add_handler(CallbackQueryHandler(self.button_callback))
+            
+            # Start bot
+            logger.info("Telegram bot starting...")
+            
+            # Start scanning in background
+            asyncio.create_task(self.start_scanning())
+            
+            # Start polling - this will keep the bot running
+            await self.application.run_polling()
+            
+        except Exception as e:
+            logger.error(f"Telegram bot failed to start: {e}")
+            raise
 
-async def run(self):
-    """Start the Telegram bot - CORRECTED VERSION"""
-    # Create application
-    self.application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+# For direct execution testing
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
     
-    # Add command handlers
-    self.application.add_handler(CommandHandler("start", self.start_command))
-    self.application.add_handler(CommandHandler("setleverage", self.set_leverage_command))
-    self.application.add_handler(CommandHandler("setrisk", self.set_risk_command))
-    self.application.add_handler(CommandHandler("balance", self.check_balance_command))
+    # Load environment variables for testing
+    load_dotenv()
     
-    # Add callback handler for buttons
-    self.application.add_handler(CallbackQueryHandler(self.button_callback))
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
     
-    # Start bot
-    logger.info("Telegram bot starting...")
-    
-    # 🔥 CORRECTION: Use create_task instead of await for polling
-    # This prevents blocking the main event loop
-    asyncio.create_task(self.application.run_polling())
-    
-    # 🔥 ADD: Start scanning in background
-    asyncio.create_task(self.start_scanning())
-    
-    # 🔥 ADD: Keep the event loop running
-    # This is the key fix - we need to keep the main coroutine alive
-    while True:
-        await asyncio.sleep(3600)  # Sleep for 1 hour, keep bot alive
+    # Create and run bot
+    bot = TelegramBot()
+    asyncio.run(bot.run())
